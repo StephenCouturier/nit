@@ -1,0 +1,3 @@
+#!/bin/sh
+# Thin launcher so `nit` works from any shell (agents' tool calls, slash commands), not just an alias.
+exec node "$(dirname "$(readlink -f "$0")")/../packages/cli/nit.ts" "$@"

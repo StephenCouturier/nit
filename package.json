@@ -1,0 +1,42 @@
+{
+	"name": "nit",
+	"version": "0.4.0",
+	"description": "Review your branch diff in a pi TUI, leave threaded line comments, and dispatch them to the agent to fix",
+	"license": "MIT",
+	"author": "Stephen Couturier",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/StephenCouturier/nit.git"
+	},
+	"keywords": [
+		"pi-package",
+		"pi",
+		"code-review",
+		"tui",
+		"git"
+	],
+	"type": "module",
+	"files": [
+		"extensions/**/*.ts",
+		"packages/**/*.ts",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./extensions/nit"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"scripts": {
+		"nit": "node packages/cli/nit.ts"
+	},
+	"engines": {
+		"node": ">=23.6"
+	},
+	"dependencies": {
+		"@earendil-works/pi-tui": "^1.0.2"
+	}
+}

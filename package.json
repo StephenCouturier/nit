@@ -26,6 +26,7 @@
 		"bin/nit",
 		"extensions/**/*.ts",
 		"packages/**/*.ts",
+		"!packages/**/*.test.ts",
 		"integrations/**/*.md",
 		"README.md",
 		"LICENSE"
@@ -39,7 +40,8 @@
 		"@earendil-works/pi-coding-agent": "*"
 	},
 	"scripts": {
-		"nit": "node packages/cli/nit.ts"
+		"nit": "node packages/cli/nit.ts",
+		"test": "node --test \"packages/**/*.test.ts\""
 	},
 	"engines": {
 		"node": ">=23.6"

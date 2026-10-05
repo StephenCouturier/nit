@@ -41,7 +41,7 @@ export const clipboard: Handler = {
 			const result = spawnSync(command, args, { input: prompt, stdio: ["pipe", "ignore", "ignore"] })
 			if (!result.error && result.status === 0) return { message: `copied review (${count(batch)}) to clipboard` }
 		}
-		throw new Error("no clipboard tool found (wl-copy, xclip, xsel, pbcopy)")
+		throw new Error("no clipboard tool found (wl-copy, xclip, xsel, pbcopy, clip.exe)")
 	},
 }
 

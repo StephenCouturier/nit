@@ -15,7 +15,7 @@ git clone https://github.com/StephenCouturier/nit && cd nit
 npm install && npm link
 ```
 
-**2. Add `/nit` to your agent** (`--project` installs into the current repo only):
+**2. Add `/nit` to your agent** (`$nit` in Codex; `--project` installs into the current repo only):
 
 ```sh
 nit install claude               # /nit in Claude Code
@@ -24,7 +24,11 @@ nit install codex                # $nit skill in Codex
 nit install pi                   # /nit extension in pi (or, inside pi: pi install git:github.com/StephenCouturier/nit)
 ```
 
-In Claude Code, opencode and Codex, `/nit` opens the review in a herdr pane, a tmux popup or a floating Hyprland terminal, so run the agent inside one of those (pi shows it inline). Elsewhere, run `nit --copy` in another terminal and paste the result into the agent.
+In Claude Code, opencode and Codex, the installed command opens the review in a herdr pane, a tmux popup or a floating Hyprland terminal, so run the agent inside one of those (pi shows it inline). Elsewhere, run `nit --copy` in another terminal and paste the result into the agent.
+
+Rerunning `nit install <agent>` leaves identical command files alone. For Claude Code, opencode and Codex, use `--force` to replace an existing command or skill that differs.
+
+`--copy` needs a working clipboard helper: `wl-copy` (Wayland), `xclip` or `xsel` (X11), `pbcopy` (macOS), or `clip.exe` (WSL).
 
 In Codex, `$nit` has to run outside the sandbox, which blocks the herdr, tmux and Hyprland sockets. Approve the escalation when Codex asks.
 
@@ -47,6 +51,8 @@ nit --base origin/dev   review the branch against an explicit base ref (in pi: /
 
 By default the diff covers only what you haven't committed yet, diffed against `HEAD`. With `--branch` (or `-b`), or an explicit base ref, it covers everything on the branch: commits since the merge base, plus staged, unstaged, and untracked files.
 
+Base detection tries `origin/HEAD`, then `origin/main`, `origin/master`, `origin/develop`, then the local `main`, `master`, and `develop` branches. Use `--base <ref>` if none matches your workflow.
+
 Comments live in the same per-branch file regardless of scope, so a comment left on uncommitted changes is still there when you open the full branch review.
 
 ### Keys
@@ -56,7 +62,7 @@ Comments live in the same per-branch file regardless of scope, so a comment left
 | `j` / `k` / `↓` / `↑` | Move cursor |
 | `n` / `p` (or `]` / `[`) | Next / previous hunk |
 | `/` / `?` | Search forward / backward (regex, smartcase, jumps as you type) |
-| `n` / `N` | Next / previous match while a search is active (`esc` clears it, then `n` is next hunk again) |
+| `n` / `N` | Repeat the last search / reverse its direction; `esc` clears highlighting but retains the search (`]` / `[` still navigate hunks) |
 | `g` / `G` | Jump to top / bottom |
 | `ctrl+d` / `ctrl+u` | Page down / up |
 | `h` / `l` | Split view: comment on the left (old) or right (new) side |
@@ -70,7 +76,7 @@ Comments live in the same per-branch file regardless of scope, so a comment left
 | `\` | Toggle side-by-side view (remembered; needs 100+ columns) |
 | `#` | Toggle line numbers (remembered) |
 | `F` | Send all open comments |
-| `q` / `esc` | Close |
+| `q` / `esc` / `ctrl+c` | Close in browse mode (`esc` / `ctrl+c` first clear a selection or search highlighting) |
 
 Every key can be rebound; see [Configuration](#configuration).
 
@@ -82,7 +88,7 @@ Every comment is a **fix** (change the code) or a **question** (answer only). Pr
 
 ## Configuration
 
-Everything lives in `~/.config/nit/` (or `$NIT_CONFIG_DIR`):
+Configuration lives in `$NIT_CONFIG_DIR`, or `$XDG_CONFIG_HOME/nit/` (default `~/.config/nit/`). The examples below include explanatory comments; remove them when saving `config.json`, which must be valid JSON:
 
 ```jsonc
 // config.json
@@ -150,7 +156,7 @@ Any CLI agent is a few lines of config. Each mode is an argv; `{prompt}` becomes
 
 Built-in headless modes run with the agent's default permissions, which usually means they can answer questions but not edit files. Add your agent's flags as above if you want headless fixes.
 
-Reviews larger than 100 KB passed as `{prompt}` are swapped for a short pointer telling the agent to run `nit show <batchId>`.
+Reviews larger than 100,000 bytes passed as command-line arguments (including `{prompt}`) are swapped for a short pointer telling the agent to run `nit show <batchId>`.
 
 Hosts that embed nit (like the pi extension) implement the `Handler` interface in `packages/core/handler.ts` directly.
 
@@ -158,18 +164,27 @@ Hosts that embed nit (like the pi extension) implement the `Handler` interface i
 
 `/nit` runs `nit popup`, which opens the review in a herdr pane, a tmux popup or a floating Hyprland terminal, waits for you, and returns the review into the session. Claude Code and opencode run it directly; the Codex skill asks Codex to run it outside the sandbox with a long timeout.
 
-Quitting with `q` prints nothing and exits 130, so nothing downstream runs.
+Quitting the standalone review without sending prints no review and exits 130. `nit popup` instead prints `Review cancelled: no comments were sent.` when no review is returned; the installed integrations tell the agent to stop in that case. A shell pipeline still starts its downstream command even if the standalone review is cancelled.
+
+Popup launchers are tried in order: herdr, tmux, then Hyprland. The Hyprland launcher needs `hyprctl` and either `alacritty` or `xdg-terminal-exec`. The popup waits up to an hour by default; set `NIT_POPUP_TIMEOUT` to change that limit in seconds.
 
 Other commands:
 
 ```sh
-nit pending                            # sent, not yet replied
-nit history                            # every batch you've sent, with its replies
-nit show <batchId>                     # the exact markdown that was sent
+nit pending [--json]                   # sent threads that have no reply yet
+nit history [--json]                   # every batch you've sent, with its replies
+nit show <batchId>                     # the stored full review prompt
+nit reply <threadId> --status resolved -m "Fixed the boundary check."
+nit reply <threadId> --status answered < answer.md
 nit settle <batchId> < answer.md       # route an agent's "### N." sections back onto threads
+nit settle <batchId> --file answer.md  # same, reading from a file
 nit dispatch [--to <handler>]          # non-interactive: send all open threads (default stdout)
-nit mcp                                # MCP server on stdio
+nit mcp                               # MCP server on stdio
 ```
+
+Run reply and batch commands from the same repository and branch as the review. `nit reply` accepts text from `-m` / `--message` or stdin; without `--status`, fixes become `resolved` and questions become `answered`.
+
+`nit dispatch` also accepts `--branch`, `--base <ref>`, and `--reply cli|tool|sections`. Add `--compact` to send a short pointer to `nit show <batchId>` instead of the full prompt (not used with section-based replies). Unlike the interactive review, dispatch defaults to stdout even when a handler is configured.
 
 The MCP server (see [Install](#install)) exposes `review_list_pending`, `review_get` and `review_reply`.
 
@@ -186,9 +201,9 @@ Reviews persist per repo and branch at:
 
 Override the root with `NIT_HOME` (or `XDG_DATA_HOME`). Coming from llm-review? The first run copies `~/.local/share/llm-review/` and `~/.config/llm-review/` to their nit locations (the originals are left alone), and the pi extension still picks up reviews saved under `~/.pi/agent/llm-review/`.
 
-Nothing is written into the repository you're reviewing.
+Review state is stored outside the repository. Explicit operations such as `--out review.md` and `nit install <agent> --project` can still write files there.
 
-Saves merge against what is already on disk, keyed by thread id (newest `updatedAt` wins), so two sessions, the MCP server and the CLI can all write to the same branch without clobbering each other. A thread is only removed when you explicitly delete it with `d`.
+Thread saves merge against what is already on disk, keyed by thread id (newest `updatedAt` wins), preserving newer replies from other sessions in normal use. Writes use atomic file replacement, but there is no cross-process locking, so simultaneous saves can still race. A thread is only removed when you explicitly delete it with `d`.
 
 Set `NIT_DEBUG=1` to append render/geometry diagnostics to `/tmp/nit-debug.log` (override with `NIT_DEBUG_FILE`).
 

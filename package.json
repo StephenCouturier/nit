@@ -1,7 +1,7 @@
 {
 	"name": "nit",
 	"version": "0.4.0",
-	"description": "Review your branch diff in a pi TUI, leave threaded line comments, and dispatch them to the agent to fix",
+	"description": "Review your agent's diff in a TUI, leave threaded line comments, and hand them to any coding agent: Claude Code, Codex, opencode, pi, or a pipe",
 	"license": "MIT",
 	"author": "Stephen Couturier",
 	"repository": {
@@ -11,14 +11,22 @@
 	"keywords": [
 		"pi-package",
 		"pi",
+		"claude-code",
+		"codex",
+		"opencode",
 		"code-review",
 		"tui",
 		"git"
 	],
 	"type": "module",
+	"bin": {
+		"nit": "bin/nit"
+	},
 	"files": [
+		"bin/nit",
 		"extensions/**/*.ts",
 		"packages/**/*.ts",
+		"integrations/**/*.md",
 		"README.md",
 		"LICENSE"
 	],

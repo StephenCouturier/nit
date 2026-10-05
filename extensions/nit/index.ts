@@ -2,8 +2,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent"
 import { loadConfig, loadUiPrefs, saveUiPrefs } from "../../packages/core/config.ts"
 import type { Exec, ReviewScope } from "../../packages/core/git.ts"
+import type { Handler } from "../../packages/core/handler.ts"
 import type { LoadedReview } from "../../packages/core/review.ts"
-import { dispatchThreads, loadReview, settleBatch } from "../../packages/core/review.ts"
+import { loadReview, sendReview, settleBatch } from "../../packages/core/review.ts"
 import { saveState } from "../../packages/core/store.ts"
 import type { Thread } from "../../packages/core/threads.ts"
 import { isQuestion } from "../../packages/core/threads.ts"
@@ -163,28 +164,31 @@ export default function (pi: ExtensionAPI) {
 
 			if (dispatch.threads.length === 0) return
 
-			const { batch, prompt } = await dispatchThreads(makeExec(ctx.cwd), loaded, dispatch.threads, {
-				transport: "pi",
+			// pi is the one host nit runs inside: deliver into this session, settle when the agent does.
+			const session: Handler = {
+				name: "pi",
+				description: "the running pi session",
 				replyVia: "sections",
-				deleted,
-			})
-			pendingBatch = batch.id
-
-			const questions = dispatch.threads.filter(isQuestion).length
-			pi.appendEntry("nit-dispatch", {
-				batchId: batch.id,
-				count: dispatch.threads.length,
-				questions,
-				fixes: dispatch.threads.length - questions,
-				threads: dispatch.threads.map((thread) => ({
-					id: thread.id,
-					path: thread.path,
-					line: thread.line,
-					kind: thread.kind,
-				})),
-			})
-
-			pi.sendUserMessage(prompt.text, ctx.isIdle() ? undefined : { deliverAs: "followUp" })
+				async deliver({ prompt, batch }) {
+					pendingBatch = batch.id
+					const questions = dispatch.threads.filter(isQuestion).length
+					pi.appendEntry("nit-dispatch", {
+						batchId: batch.id,
+						count: dispatch.threads.length,
+						questions,
+						fixes: dispatch.threads.length - questions,
+						threads: dispatch.threads.map((thread) => ({
+							id: thread.id,
+							path: thread.path,
+							line: thread.line,
+							kind: thread.kind,
+						})),
+					})
+					pi.sendUserMessage(prompt, ctx.isIdle() ? undefined : { deliverAs: "followUp" })
+					return {}
+				},
+			}
+			await sendReview(makeExec(ctx.cwd), loaded, dispatch.threads, session, { cwd: ctx.cwd, deleted, host: host() })
 		},
 	})
 

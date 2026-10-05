@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import type { AgentSpec } from "./handler.ts"
 import { adoptLegacyDir, dataDir, writeJsonAtomic } from "./store.ts"
 
 /**
  * User configuration, read from ~/.config/nit/ (or $NIT_CONFIG_DIR):
  *
- *   config.json   { "theme": "terminal" | "<base16 scheme file>", "keys": { "<action>": "<key>" | ["<key>", ...] }, "context": 3 }
+ *   config.json   { "theme": "terminal" | "<base16 scheme file>", "keys": { "<action>": "<key>" | ["<key>", ...] }, "context": 3,
+ *                   "handler": "<default handler>", "handlers": { "<name>": <AgentSpec> } }
  *   header.md     replaces the opening line of the prompt
  *   footer.md     replaces the closing guidelines of the prompt
  *
@@ -17,6 +19,10 @@ export interface Config {
 	keys?: Record<string, string | string[]>
 	/** Diff lines of context shown around each comment in the prompt. */
 	context?: number
+	/** Where `nit` sends a review by default: stdout, clipboard, claude, codex, ... */
+	handler?: string
+	/** Extra CLI agents, or overrides of the built-in ones (see handler.ts). */
+	handlers?: Record<string, AgentSpec>
 }
 
 export interface Templates {

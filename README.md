@@ -1,27 +1,48 @@
 # nit
 
-A [pi](https://pi.dev) extension for reviewing your branch's changes in a TUI and handing the comments to the agent to fix.
+Review your coding agent's changes in a terminal UI, leave line-anchored comments, and hand them back to the agent to fix. Works with Claude Code, Codex, opencode and pi, or any other CLI agent, a pipe, the clipboard, or a file.
 
-Run `/nit`, walk the diff, leave line-anchored comments, hit `F`. The agent gets your comments as a structured work list, fixes them in the same session with full context, and its reply is attached back onto each comment thread.
+Walk the diff, comment, hit `F`. A **handler** delivers the comments as a structured work list, and the agent's per-thread replies land back on your comment threads.
 
 ## Install
 
+Requires Node >= 23.6 and git (and pi >= 0.85 for the pi extension).
+
+**1. Put `nit` on your PATH:**
+
 ```sh
-pi install git:github.com/StephenCouturier/nit
+git clone https://github.com/StephenCouturier/nit && cd nit
+npm install && npm link
 ```
 
-Or try it for a single run without installing:
+**2. Add `/nit` to your agent** (`--project` installs into the current repo only):
 
 ```sh
-pi -e git:github.com/StephenCouturier/nit
+nit install claude               # /nit in Claude Code
+nit install opencode             # /nit in opencode
+nit install codex                # $nit skill in Codex
+nit install pi                   # /nit extension in pi (or, inside pi: pi install git:github.com/StephenCouturier/nit)
+```
+
+In Claude Code, opencode and Codex, `/nit` opens the review in a herdr pane, a tmux popup or a floating Hyprland terminal, so run the agent inside one of those (pi shows it inline). Elsewhere, run `nit --copy` in another terminal and paste the result into the agent.
+
+In Codex, `$nit` has to run outside the sandbox, which blocks the herdr, tmux and Hyprland sockets. Approve the escalation when Codex asks.
+
+**3. Optional: MCP replies.** With nit's MCP server the agent reports back per thread, instead of through `nit reply` or by having its final message parsed:
+
+```sh
+claude mcp add nit -- nit mcp
+codex mcp add nit -- nit mcp
 ```
 
 ## Usage
 
+From inside an agent, run `/nit` (or `$nit` in Codex). From a shell, run `nit`:
+
 ```
-/nit              review only uncommitted changes (staged, unstaged, untracked)
-/nit --branch     review the whole branch against its auto-detected base
-/nit origin/dev   review the branch against an explicit base ref
+nit                  review only uncommitted changes (staged, unstaged, untracked)
+nit --branch         review the whole branch against its auto-detected base
+nit --base origin/dev   review the branch against an explicit base ref (in pi: /nit origin/dev)
 ```
 
 By default the diff covers only what you haven't committed yet, diffed against `HEAD`. With `--branch` (or `-b`), or an explicit base ref, it covers everything on the branch: commits since the merge base, plus staged, unstaged, and untracked files.
@@ -68,7 +89,9 @@ Everything lives in `~/.config/nit/` (or `$NIT_CONFIG_DIR`):
 {
   "theme": "terminal",            // default: your terminal's palette, or a base16 scheme file, e.g. "tomorrow-night.yaml"
   "keys": { "send": "ctrl+s", "down": ["j", "down"] },
-  "context": 3                     // diff lines shown around each comment in the prompt
+  "context": 3,                    // diff lines shown around each comment in the prompt
+  "handler": "stdout",             // where `nit` sends a review by default (see Handlers)
+  "handlers": {}                   // extra agents, or overrides of the built-in ones
 }
 ```
 
@@ -78,34 +101,64 @@ Everything lives in `~/.config/nit/` (or `$NIT_CONFIG_DIR`):
 
 ## How it works
 
-Comments are threads, not one-shot notes. Each has a severity, a status (`open` → `fixing` → `resolved`), and a message list that both you and the agent append to.
+Comments are threads, not one-shot notes. Each has a kind, a status (`open` → `fixing` → `resolved`), and a message list that both you and the agent append to.
 
-When you dispatch, the extension builds a prompt in `CRITICAL` / `WARNING` / `SUGGESTION` form with `file.ts:42` anchors and the relevant source line quoted, then sends it into the current pi session with `sendUserMessage`. Because it's the same session, the agent already has the context of the code it just wrote.
+When you send, nit marks the threads in flight, records a batch, and renders one prompt with `file.ts:42` anchors and the surrounding diff quoted. The handler only delivers it. Delivering into the agent's own session (the pi extension, `/nit`, or `--continue`) means the agent already has the context of the code it just wrote.
 
-The review UI closes while the agent works, so you can watch the transcript. Reopen with `/nit` to see the result: threads are re-anchored onto the new line numbers by matching their source line, and any thread whose anchor disappeared is flagged `moved` rather than silently dropped.
+The review UI closes while the agent works. Reopen it to see the result: threads are re-anchored onto the new line numbers by matching their source line, and any thread whose anchor disappeared is flagged `moved` rather than silently dropped.
 
-## Standalone (any agent)
+## Handlers
 
-The same review UI runs outside pi as a filter, like `fzf`. It draws on `/dev/tty`, and when you press `f`/`F` it writes the review to stdout as markdown, with the diff around each comment and its line numbers. Pipe that into whatever agent you use:
+A handler decides where the review goes when you press `F`. From a shell, pick one with `--to`, or set a default with `"handler"` in config.json (otherwise it's `stdout`):
 
 ```sh
-npm install                                   # once, for the TUI dependency (Node >= 23.6)
-alias nit='node /path/to/nit/packages/cli/nit.ts'
-
-nit | claude -p                        # review, then hand it to a headless agent
-nit | codex exec -
-nit --copy                             # to the clipboard, to paste into a running agent
-nit --out review.md                    # or a file
-nit --branch                           # the whole branch, not just uncommitted changes; --base <ref> for an explicit base
+nit                                    # stdout: nit | claude -p,  nit | codex exec -
+nit --copy                             # clipboard, to paste into a running agent
+nit --out review.md                    # a file
+nit --to claude                        # a new Claude Code session, seeded with the review
+nit --to codex --continue              # the agent's most recent session here, which already knows its changes
+nit --to opencode --headless           # run to completion, print the output, settle from it
+nit handlers                           # list every handler and whether it's installed
 ```
+
+The modes also work as a suffix: `--to claude:continue`, `--to pi:headless`.
+
+| Handler | Delivers to | Replies |
+| --- | --- | --- |
+| `stdout`, `clipboard`, `file` | whatever you pipe or paste into | agent runs `nit reply`; batch stays pending until it does |
+| `claude`, `codex`, `opencode`, `pi` | the agent CLI, `start` / `continue` / `headless` | interactive: `nit reply`, settled when the agent exits. Headless: `### N.` sections parsed from its output |
+| `/nit` slash command | the session you ran it in, via `nit popup` | `nit reply` |
+| pi extension | the running pi session | `### N.` sections, settled when the agent finishes its turn |
+
+Threads the agent never replied to are flagged `needs_review` (shown as `check`) when a batch settles, not silently marked done. `--reply cli|tool|sections` overrides how the agent is told to report back.
+
+### Adding an agent
+
+Any CLI agent is a few lines of config. Each mode is an argv; `{prompt}` becomes the review as one argument, `{file}` the path of a temp file holding it. With neither, `headless` gets the review on stdin and the interactive modes get it as the last argument.
+
+```jsonc
+// ~/.config/nit/config.json
+{
+  "handler": "claude",
+  "handlers": {
+    "aider":  { "description": "aider", "start": ["aider", "--message-file", "{file}"] },
+    // override a built-in field by field, e.g. let headless Claude edit files
+    "claude": { "headless": ["claude", "-p", "--permission-mode", "acceptEdits"] }
+  }
+}
+```
+
+Built-in headless modes run with the agent's default permissions, which usually means they can answer questions but not edit files. Add your agent's flags as above if you want headless fixes.
+
+Reviews larger than 100 KB passed as `{prompt}` are swapped for a short pointer telling the agent to run `nit show <batchId>`.
+
+Hosts that embed nit (like the pi extension) implement the `Handler` interface in `packages/core/handler.ts` directly.
+
+### Slash commands and `nit popup`
+
+`/nit` runs `nit popup`, which opens the review in a herdr pane, a tmux popup or a floating Hyprland terminal, waits for you, and returns the review into the session. Claude Code and opencode run it directly; the Codex skill asks Codex to run it outside the sandbox with a long timeout.
 
 Quitting with `q` prints nothing and exits 130, so nothing downstream runs.
-
-By default the markdown tells the agent to report back per thread with the CLI, so replies land on your threads whatever agent you use:
-
-```sh
-nit reply <threadId> --status resolved|answered|wontfix|needs_info -m "what changed"
-```
 
 Other commands:
 
@@ -114,17 +167,13 @@ nit pending                            # sent, not yet replied
 nit history                            # every batch you've sent, with its replies
 nit show <batchId>                     # the exact markdown that was sent
 nit settle <batchId> < answer.md       # route an agent's "### N." sections back onto threads
-nit dispatch                           # non-interactive: send all open threads
+nit dispatch [--to <handler>]          # non-interactive: send all open threads (default stdout)
 nit mcp                                # MCP server on stdio
 ```
 
-The MCP server exposes `review_list_pending`, `review_get` and `review_reply`, so an agent reports back per thread instead of having its final message parsed. For example, with Claude Code:
+The MCP server (see [Install](#install)) exposes `review_list_pending`, `review_get` and `review_reply`.
 
-```sh
-claude mcp add nit -- node /path/to/nit/packages/cli/nit.ts mcp
-```
-
-Agent replies may set `resolved`, `answered`, `wontfix` or `needs_info`. Threads still in flight when a batch settles without a reply are flagged `needs_review` (shown as `check`) instead of being marked done.
+Agent replies may set `resolved`, `answered`, `wontfix` or `needs_info`.
 
 ## State
 
@@ -142,11 +191,6 @@ Nothing is written into the repository you're reviewing.
 Saves merge against what is already on disk, keyed by thread id (newest `updatedAt` wins), so two sessions, the MCP server and the CLI can all write to the same branch without clobbering each other. A thread is only removed when you explicitly delete it with `d`.
 
 Set `NIT_DEBUG=1` to append render/geometry diagnostics to `/tmp/nit-debug.log` (override with `NIT_DEBUG_FILE`).
-
-## Requirements
-
-- pi >= 0.85
-- git
 
 ## Known limitations
 

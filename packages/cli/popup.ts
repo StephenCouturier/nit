@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process"
+import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url"
  */
 
 const CLI = fileURLToPath(new URL("./nit.ts", import.meta.url))
-const FORWARDED_ENV = ["NIT_HOME", "XDG_DATA_HOME", "PATH", "HOME"]
+const FORWARDED_ENV = ["NIT_HOME", "NIT_CONFIG_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "PATH", "HOME"]
 const POLL_MS = 250
 
 function quote(value: string): string {
@@ -57,7 +57,10 @@ function prepare(cwd: string, reviewArgs: string[]): Session {
 	return session
 }
 
-/** Returns a liveness check for the launched UI, or null when this launcher isn't available. */
+/**
+ * Returns a liveness check for the launched UI, or null when this launcher isn't available.
+ * Throws when it's available but failing, e.g. an agent sandbox blocking its socket.
+ */
 type Launcher = (session: Session, cwd: string) => (() => boolean) | null
 
 const herdr: Launcher = (session, cwd) => {
@@ -66,7 +69,7 @@ const herdr: Launcher = (session, cwd) => {
 		encoding: "utf-8",
 	})
 	const id = /"pane_id":"([^"]+)"/.exec(split.stdout ?? "")?.[1]
-	if (split.status !== 0 || !id) return null
+	if (split.status !== 0 || !id) throw new Error(failure("herdr pane split", split))
 	spawnSync("herdr", ["pane", "zoom", id, "--on"])
 	spawnSync("herdr", ["pane", "run", id, `sh ${quote(session.script)}; exit`])
 	return () => spawnSync("herdr", ["pane", "get", id], { encoding: "utf-8" }).status === 0
@@ -84,6 +87,11 @@ const tmux: Launcher = (session, cwd) => {
 	return () => alive
 }
 
+function failure(what: string, result: SpawnSyncReturns<string>): string {
+	const detail = result.error?.message ?? (result.stderr || result.stdout).trim().split("\n")[0]
+	return `${what} failed${detail ? `: ${detail}` : ` with code ${result.status}`}`
+}
+
 function which(command: string): boolean {
 	return spawnSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0
 }
@@ -96,11 +104,11 @@ const hyprland: Launcher = (session) => {
 		: which("xdg-terminal-exec")
 			? `xdg-terminal-exec ${run}`
 			: null
-	if (!terminal) return null
+	if (!terminal) throw new Error("no alacritty or xdg-terminal-exec to open")
 	const result = spawnSync("hyprctl", ["dispatch", "exec", `[float; size 90% 90%; center] ${terminal}`], {
 		encoding: "utf-8",
 	})
-	if (result.status !== 0) return null
+	if (result.status !== 0) throw new Error(failure("hyprctl dispatch", result))
 	// The terminal isn't our child; we can only wait for the sentinel.
 	return () => true
 }
@@ -131,14 +139,23 @@ export async function popup(reviewArgs: string[]): Promise<void> {
 	const session = prepare(cwd, reviewArgs)
 	try {
 		let alive: (() => boolean) | null = null
-		for (const [, launch] of LAUNCHERS) {
-			alive = launch(session, cwd)
+		const failures: string[] = []
+		for (const [name, launch] of LAUNCHERS) {
+			try {
+				alive = launch(session, cwd)
+			} catch (error) {
+				failures.push(`${name}: ${(error as Error).message}`)
+			}
 			if (alive) break
 		}
 		if (!alive) {
 			process.stdout.write(
-				"nit could not open a review window here (no herdr, tmux or Hyprland detected).\n" +
-					"Run `nit --copy` in another terminal and paste the result instead.\n",
+				failures.length
+					? "nit could not open a review window:\n" +
+							failures.map((line) => `  ${line}\n`).join("") +
+							"If this is running inside an agent's sandbox, rerun `nit popup` outside it.\n"
+					: "nit could not open a review window here (no herdr, tmux or Hyprland detected).\n" +
+							"Run `nit --copy` in another terminal and paste the result instead.\n",
 			)
 			process.exitCode = 1
 			return

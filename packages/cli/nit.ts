@@ -1,29 +1,45 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { listBatches, loadBatch } from "../core/batch.ts"
+import { loadConfig } from "../core/config.ts"
 import { nodeExec } from "../core/exec.ts"
 import type { ReviewScope } from "../core/git.ts"
+import type { AgentMode, Handler } from "../core/handler.ts"
 import type { ReplyVia } from "../core/render.ts"
 import { buildCompactPrompt, buildDispatchPrompt } from "../core/render.ts"
-import { dispatchThreads, loadBranchState, loadReview, pendingThreads, replyToThreadById, settleBatch } from "../core/review.ts"
+import type { Sent } from "../core/review.ts"
+import { loadBranchState, loadReview, pendingThreads, replyToThreadById, sendReview, settleBatch } from "../core/review.ts"
 import type { ReplyStatus } from "../core/threads.ts"
 import { openThreads, REPLY_STATUSES, threadLocation } from "../core/threads.ts"
+import { listHandlers, nitCommand, resolveHandler } from "../handlers/index.ts"
+import { stdout } from "../handlers/pipe.ts"
+import { INSTALLABLE, install } from "../handlers/install.ts"
 import { runMcpServer } from "./mcp.ts"
 import { popup } from "./popup.ts"
 
-const USAGE = `nit [review] [--branch] [--base <ref>] [--reply cli|tool|sections] [--copy] [--out <file>]
+const USAGE = `nit [review] [--to <handler>] [--continue | --headless] [--branch] [--base <ref>]
+    [--reply cli|tool|sections] [--copy] [--out <file>]
                          open the review TUI on uncommitted changes (--branch: the whole branch
-                         vs its base); f/F writes the review as markdown to stdout
-                         (or the clipboard / a file), ready to hand to any agent:
-                           nit | claude -p      nit --copy      nit > review.md
+                         vs its base); F sends the review to a handler:
+                           nit                  markdown on stdout: nit | claude -p
+                           nit --copy           the clipboard (--to clipboard)
+                           nit --out review.md  a file (--to file)
+                           nit --to claude      a new agent session seeded with the review
+                           nit --to codex --continue
+                                                the agent's last session here, which knows its changes
+                           nit --to pi --headless
+                                                run the agent to completion and settle from its output
+                         The default handler is "handler" in config.json, else stdout.
 
 nit <command>
 
+  handlers               list handlers (built-in and from config.json) and whether they're installed
+  install <agent> [--project] [--force]
+                         add a /nit command to ${INSTALLABLE.join(", ")}
   popup [review options] open the TUI in a herdr pane / tmux popup / floating Hyprland terminal,
                          wait for it, and print the review (for agents' slash commands)
-  dispatch [--branch] [--base <ref>] [--reply sections|tool|cli] [--compact]
-                         send all open threads as a new batch; prints the prompt to stdout
+  dispatch [--to <handler>] [--branch] [--base <ref>] [--reply sections|tool|cli] [--compact]
+                         send all open threads as a new batch without the TUI (default: stdout)
   pending [--json]       threads sent to an agent that have no reply yet
   show <batchId> [--reply sections|tool|cli]
                          print a batch's prompt
@@ -61,32 +77,44 @@ function readStdin(): string {
 	}
 }
 
-function replyVia(args: string[], fallback: ReplyVia): ReplyVia {
-	const value = flag(args, "--reply") ?? fallback
-	if (value !== "sections" && value !== "tool" && value !== "cli") throw new Error(`invalid --reply ${value}`)
+function replyVia(args: string[]): ReplyVia | undefined {
+	const value = flag(args, "--reply")
+	if (value !== undefined && value !== "sections" && value !== "tool" && value !== "cli") throw new Error(`invalid --reply ${value}`)
 	return value
 }
 
-const CLIPBOARD_COMMANDS: [string, string[]][] = [
-	["wl-copy", []],
-	["xclip", ["-selection", "clipboard"]],
-	["xsel", ["--clipboard", "--input"]],
-	["pbcopy", []],
-	["clip.exe", []],
-]
+function agentMode(args: string[]): AgentMode | undefined {
+	if (has(args, "--headless")) return "headless"
+	if (has(args, "--continue")) return "continue"
+	return undefined
+}
 
-function copyToClipboard(text: string): boolean {
-	for (const [command, args] of CLIPBOARD_COMMANDS) {
-		const result = spawnSync(command, args, { input: text, stdio: ["pipe", "ignore", "ignore"] })
-		if (!result.error && result.status === 0) return true
+/** Explicit flags win over the configured default: --to, then --copy / --out, then config "handler", then stdout. */
+function chooseHandler(args: string[]): Handler {
+	const config = loadConfig()
+	const out = flag(args, "--out", "-o")
+	const name = flag(args, "--to", "-t") ?? (has(args, "--copy", "-c") ? "clipboard" : out ? "file" : (config.handler ?? "stdout"))
+	const handler = resolveHandler(name, { mode: agentMode(args), out, config })
+	handler.preflight?.()
+	return handler
+}
+
+function report(sent: Sent): void {
+	if (sent.delivered.message) process.stderr.write(`${sent.delivered.message}\n`)
+	if (sent.settled) {
+		const { batch, routed, unanswered } = sent.settled
+		const replied = batch.threadIds.length - routed - unanswered
+		const flagged = unanswered > 0 ? `, ${unanswered} need review (no reply)` : ""
+		process.stderr.write(`nit: batch ${batch.id} settled: ${replied} replied, ${routed} from sections${flagged}\n`)
 	}
-	return false
 }
 
 async function review(args: string[]): Promise<void> {
 	const exec = nodeExec(process.cwd())
 	const base = flag(args, "--base")
 	const scope = reviewScope(args, base)
+	// Before the TUI, so a missing agent doesn't cost the user their review session.
+	const handler = chooseHandler(args)
 	const loaded = await loadReview(exec, { scope, baseOverride: base })
 	if (loaded.files.length === 0) {
 		process.stderr.write(scope === "local" ? "no uncommitted changes\n" : `no changes against ${loaded.state.baseRef}\n`)
@@ -96,31 +124,20 @@ async function review(args: string[]): Promise<void> {
 
 	// Loaded lazily so the agent-facing commands (reply, mcp, ...) need no UI dependencies.
 	const { runReviewTui } = await import("../tui/standalone.ts")
-	const out = flag(args, "--out", "-o")
-	const copy = has(args, "--copy", "-c")
-	const { threads, deleted } = await runReviewTui(loaded, { sendLabel: copy ? "copy" : "emit" })
+	const { threads, deleted } = await runReviewTui(loaded, { sendLabel: handler.sendLabel })
 	if (threads.length === 0) {
 		process.exitCode = 130
 		return
 	}
 
-	const transport = copy ? "clipboard" : out ? "file" : "stdout"
-	const { batch, prompt } = await dispatchThreads(exec, loaded, threads, {
-		transport,
-		replyVia: replyVia(args, "cli"),
-		deleted,
-	})
-
-	if (copy) {
-		if (!copyToClipboard(prompt.text)) throw new Error("no clipboard tool found (wl-copy, xclip, xsel, pbcopy)")
-		process.stderr.write(`copied review (${threads.length} comment(s), batch ${batch.id}) to clipboard\n`)
-	} else if (out) {
-		writeFileSync(out, `${prompt.text}\n`)
-		process.stderr.write(`wrote review (${threads.length} comment(s), batch ${batch.id}) to ${out}\n`)
-	} else {
-		process.stdout.write(`${prompt.text}\n`)
-		if (!process.stdout.isTTY) process.stderr.write(`nit: sent ${threads.length} comment(s), batch ${batch.id}\n`)
-	}
+	report(
+		await sendReview(exec, loaded, threads, handler, {
+			cwd: process.cwd(),
+			replyVia: replyVia(args),
+			deleted,
+			nitCommand: nitCommand(),
+		}),
+	)
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -139,6 +156,7 @@ async function main(argv: string[]): Promise<void> {
 	switch (command) {
 		case "dispatch": {
 			const base = flag(args, "--base")
+			let handler = flag(args, "--to", "-t") || flag(args, "--out", "-o") || has(args, "--copy", "-c") ? chooseHandler(args) : stdout
 			const loaded = await loadReview(exec, { scope: reviewScope(args, base), baseOverride: base })
 			const threads = openThreads(loaded.state)
 			if (threads.length === 0) {
@@ -146,10 +164,39 @@ async function main(argv: string[]): Promise<void> {
 				process.exitCode = 1
 				return
 			}
-			const via = replyVia(args, "cli")
-			const { batch, prompt } = await dispatchThreads(exec, loaded, threads, { transport: "stdout", replyVia: via })
-			process.stdout.write(`${has(args, "--compact") && via !== "sections" ? buildCompactPrompt(batch, via) : prompt.text}\n`)
-			process.stderr.write(`batch ${batch.id}: ${threads.length} thread(s)\n`)
+			const via = replyVia(args) ?? handler.replyVia
+			if (has(args, "--compact") && via !== "sections") {
+				const nit = nitCommand()
+				const inner = handler
+				handler = { ...inner, deliver: (delivery) => inner.deliver({ ...delivery, prompt: buildCompactPrompt(delivery.batch, via, nit) }) }
+			}
+			const sent = await sendReview(exec, loaded, threads, handler, { cwd: process.cwd(), replyVia: via, nitCommand: nitCommand() })
+			process.stderr.write(`batch ${sent.batch.id}: ${threads.length} thread(s)\n`)
+			report(sent)
+			return
+		}
+
+		case "handlers": {
+			const handlers = listHandlers(loadConfig())
+			const width = Math.max(...handlers.map((handler) => handler.name.length))
+			for (const handler of handlers) {
+				const modes = handler.modes.length > 0 ? ` [${handler.modes.join(", ")}]` : ""
+				const missing = handler.available ? "" : " (not installed)"
+				process.stdout.write(`${handler.name.padEnd(width)}  ${handler.description}${modes}${missing}\n`)
+			}
+			return
+		}
+
+		case "install": {
+			const agent = args[0]
+			if (!agent || agent.startsWith("-")) throw new Error(`usage: nit install <${INSTALLABLE.join("|")}> [--project] [--force]`)
+			const lines = install(agent, {
+				project: has(args, "--project"),
+				force: has(args, "--force"),
+				cwd: process.cwd(),
+				nit: nitCommand(),
+			})
+			for (const line of lines) process.stdout.write(`${line}\n`)
 			return
 		}
 
@@ -179,8 +226,11 @@ async function main(argv: string[]): Promise<void> {
 			const threads = batch.threadIds
 				.map((id) => state.threads.find((thread) => thread.id === id))
 				.filter((thread) => thread !== undefined)
-			const via = replyVia(args, batch.replyVia)
-			const text = via === batch.replyVia && batch.prompt ? batch.prompt : buildDispatchPrompt(threads, batch.baseRef, { replyVia: via }).text
+			const via = replyVia(args) ?? batch.replyVia
+			const text =
+				via === batch.replyVia && batch.prompt
+					? batch.prompt
+					: buildDispatchPrompt(threads, batch.baseRef, { replyVia: via, nitCommand: nitCommand() }).text
 			process.stdout.write(`${text}\n`)
 			return
 		}
@@ -218,7 +268,7 @@ async function main(argv: string[]): Promise<void> {
 			for (const batch of batches) {
 				const when = new Date(batch.createdAt).toISOString().replace("T", " ").slice(0, 16)
 				process.stdout.write(
-					`${batch.id}  ${when}  ${batch.status.padEnd(8)} ${batch.transport.padEnd(8)} ${batch.results.length}/${batch.threadIds.length} replied\n`,
+					`${batch.id}  ${when}  ${batch.status.padEnd(8)} ${batch.transport.padEnd(16)} ${batch.results.length}/${batch.threadIds.length} replied\n`,
 				)
 			}
 			return

@@ -22,6 +22,8 @@ export interface RenderOptions {
 	/** User overrides for the opening line and closing guidelines (see config.ts). */
 	templates?: Templates
 	branch?: string
+	/** How the agent should invoke nit for `--reply cli` (default "nit"). */
+	nitCommand?: string
 }
 
 const DEFAULT_HEADER = "I reviewed the current branch (diffed against `{base}`) and left {count} comment(s)."
@@ -122,7 +124,7 @@ export function dispatchOrder(threads: Thread[]): Thread[] {
 	]
 }
 
-function respondFooter(replyVia: ReplyVia): string[] {
+function respondFooter(replyVia: ReplyVia, nit: string): string[] {
 	const statuses = REPLY_STATUSES.join(" | ")
 	if (replyVia === "tool") {
 		return [
@@ -139,7 +141,7 @@ function respondFooter(replyVia: ReplyVia): string[] {
 			"For every thread above, run once:",
 			"",
 			"```",
-			`nit reply <threadId> --status <${statuses}> -m "<what you changed, or your answer>"`,
+			`${nit} reply <threadId> --status <${statuses}> -m "<what you changed, or your answer>"`,
 			"```",
 			"",
 			"Use `wontfix` if you disagree, `needs_info` if the comment is unclear.",
@@ -203,7 +205,7 @@ export function buildDispatchPrompt(
 
 	// The reply instructions are not templated: the round trip depends on them.
 	const footer = [
-		...respondFooter(replyVia),
+		...respondFooter(replyVia, options.nitCommand ?? "nit"),
 		"",
 		fillTemplate(options.templates?.footer ?? DEFAULT_FOOTER, values),
 	].join("\n")
@@ -218,13 +220,13 @@ export function buildDispatchPrompt(
  * A short pointer prompt for transports where pasting the full review is awkward
  * (PTY injection, slash commands). The agent pulls the batch itself.
  */
-export function buildCompactPrompt(batch: ReviewBatch, replyVia: Exclude<ReplyVia, "sections">): string {
+export function buildCompactPrompt(batch: ReviewBatch, replyVia: Exclude<ReplyVia, "sections">, nit = "nit"): string {
 	const count = batch.threadIds.length
 	const fetch =
 		replyVia === "tool"
 			? `Call the \`review_get\` tool with batchId \`${batch.id}\``
-			: `Run \`nit show ${batch.id}\``
-	const reply = replyVia === "tool" ? "`review_reply`" : "`nit reply`"
+			: `Run \`${nit} show ${batch.id}\``
+	const reply = replyVia === "tool" ? "`review_reply`" : `\`${nit} reply\``
 	return `I left ${count} review comment${count === 1 ? "" : "s"} on this branch. ${fetch} to read them, address each one, and report back per thread with ${reply}.`
 }
 

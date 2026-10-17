@@ -25,7 +25,7 @@ function activate(context) {
 	const server = net.createServer((connection) => {
 		let buffer = ""
 		connection.setEncoding("utf8")
-		connection.on("error", () => {})
+		connection.on("error", () => { })
 		const onData = (chunk) => {
 			buffer += chunk
 			const end = buffer.indexOf("\n")
@@ -79,6 +79,6 @@ function open(request, connection) {
 	})
 }
 
-function deactivate() {}
+function deactivate() { }
 
 module.exports = { activate, deactivate }

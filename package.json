@@ -1,52 +1,52 @@
 {
-	"name": "nit",
-	"version": "0.4.0",
-	"description": "Review your agent's diff in a TUI, leave threaded line comments, and hand them to any coding agent: Claude Code, Codex, opencode, pi, or a pipe",
-	"license": "MIT",
-	"author": "Stephen Couturier",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/StephenCouturier/nit.git"
-	},
-	"keywords": [
-		"pi-package",
-		"pi",
-		"claude-code",
-		"codex",
-		"opencode",
-		"vscode",
-		"code-review",
-		"tui",
-		"git"
-	],
-	"type": "module",
-	"bin": {
-		"nit": "bin/nit"
-	},
-	"files": [
-		"bin/nit",
-		"extensions/**/*.ts",
-		"packages/**/*.ts",
-		"!packages/**/*.test.ts",
-		"integrations/**/*.md",
-		"integrations/vscode/*",
-		"README.md",
-		"LICENSE"
-	],
-	"pi": {
-		"extensions": [
-			"./extensions/nit"
-		]
-	},
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-tui": "*"
-	},
-	"scripts": {
-		"nit": "node packages/cli/nit.ts",
-		"test": "node --test \"packages/**/*.test.ts\""
-	},
-	"engines": {
-		"node": ">=23.6"
-	}
+  "name": "nit",
+  "version": "0.4.0",
+  "description": "Review your agent's diff in a TUI, leave threaded line comments, and hand them to any coding agent: Claude Code, Codex, opencode, pi, or a pipe",
+  "license": "MIT",
+  "author": "Stephen Couturier",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StephenCouturier/nit.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "claude-code",
+    "codex",
+    "opencode",
+    "vscode",
+    "code-review",
+    "tui",
+    "git"
+  ],
+  "type": "module",
+  "bin": {
+    "nit": "bin/nit"
+  },
+  "files": [
+    "bin/nit",
+    "extensions/**/*.ts",
+    "packages/**/*.ts",
+    "!packages/**/*.test.ts",
+    "integrations/**/*.md",
+    "integrations/vscode/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/nit"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "scripts": {
+    "nit": "node packages/cli/nit.ts",
+    "test": "node --test \"packages/**/*.test.ts\""
+  },
+  "engines": {
+    "node": ">=23.6"
+  }
 }

@@ -22,41 +22,41 @@ const FORWARDED_ENV = ["NIT_HOME", "NIT_CONFIG_DIR", "XDG_DATA_HOME", "XDG_CONFI
 const POLL_MS = 250
 
 function quote(value: string): string {
-	return `'${value.replace(/'/g, `'\\''`)}'`
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 interface Session {
-	dir: string
-	script: string
-	out: string
-	done: string
+  dir: string
+  script: string
+  out: string
+  done: string
 }
 
 function prepare(cwd: string, reviewArgs: string[]): Session {
-	const dir = mkdtempSync(join(tmpdir(), "nit-"))
-	const session = {
-		dir,
-		script: join(dir, "run.sh"),
-		out: join(dir, "review.md"),
-		done: join(dir, "done"),
-	}
-	const exports = FORWARDED_ENV.filter((key) => process.env[key] !== undefined).map(
-		(key) => `export ${key}=${quote(process.env[key]!)}`,
-	)
-	const command = [process.execPath, CLI, "review", ...reviewArgs, "--out", session.out].map(quote).join(" ")
-	writeFileSync(
-		session.script,
-		[
-			"#!/bin/sh",
-			...exports,
-			`cd ${quote(cwd)} || { echo 1 > ${quote(session.done)}; exit 1; }`,
-			command,
-			`echo $? > ${quote(session.done)}`,
-			"",
-		].join("\n"),
-		{ mode: 0o755 },
-	)
-	return session
+  const dir = mkdtempSync(join(tmpdir(), "nit-"))
+  const session = {
+    dir,
+    script: join(dir, "run.sh"),
+    out: join(dir, "review.md"),
+    done: join(dir, "done"),
+  }
+  const exports = FORWARDED_ENV.filter((key) => process.env[key] !== undefined).map(
+    (key) => `export ${key}=${quote(process.env[key]!)}`,
+  )
+  const command = [process.execPath, CLI, "review", ...reviewArgs, "--out", session.out].map(quote).join(" ")
+  writeFileSync(
+    session.script,
+    [
+      "#!/bin/sh",
+      ...exports,
+      `cd ${quote(cwd)} || { echo 1 > ${quote(session.done)}; exit 1; }`,
+      command,
+      `echo $? > ${quote(session.done)}`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  )
+  return session
 }
 
 /**
@@ -66,77 +66,77 @@ function prepare(cwd: string, reviewArgs: string[]): Session {
 type Launcher = (session: Session, cwd: string) => (() => boolean) | null | Promise<(() => boolean) | null>
 
 const herdr: Launcher = (session, cwd) => {
-	if (!process.env.HERDR_PANE_ID) return null
-	const split = spawnSync("herdr", ["pane", "split", "--current", "--direction", "right", "--focus", "--cwd", cwd], {
-		encoding: "utf-8",
-	})
-	const id = /"pane_id":"([^"]+)"/.exec(split.stdout ?? "")?.[1]
-	if (split.status !== 0 || !id) throw new Error(failure("herdr pane split", split))
-	spawnSync("herdr", ["pane", "zoom", id, "--on"])
-	spawnSync("herdr", ["pane", "run", id, `sh ${quote(session.script)}; exit`])
-	return () => spawnSync("herdr", ["pane", "get", id], { encoding: "utf-8" }).status === 0
+  if (!process.env.HERDR_PANE_ID) return null
+  const split = spawnSync("herdr", ["pane", "split", "--current", "--direction", "right", "--focus", "--cwd", cwd], {
+    encoding: "utf-8",
+  })
+  const id = /"pane_id":"([^"]+)"/.exec(split.stdout ?? "")?.[1]
+  if (split.status !== 0 || !id) throw new Error(failure("herdr pane split", split))
+  spawnSync("herdr", ["pane", "zoom", id, "--on"])
+  spawnSync("herdr", ["pane", "run", id, `sh ${quote(session.script)}; exit`])
+  return () => spawnSync("herdr", ["pane", "get", id], { encoding: "utf-8" }).status === 0
 }
 
 const tmux: Launcher = (session, cwd) => {
-	if (!process.env.TMUX) return null
-	const child = spawn("tmux", ["display-popup", "-E", "-w", "95%", "-h", "95%", "-d", cwd, `sh ${quote(session.script)}`], {
-		stdio: "ignore",
-	})
-	let alive = true
-	child.on("exit", () => {
-		alive = false
-	})
-	return () => alive
+  if (!process.env.TMUX) return null
+  const child = spawn("tmux", ["display-popup", "-E", "-w", "95%", "-h", "95%", "-d", cwd, `sh ${quote(session.script)}`], {
+    stdio: "ignore",
+  })
+  let alive = true
+  child.on("exit", () => {
+    alive = false
+  })
+  return () => alive
 }
 
 /** NIT_VSCODE_SOCKET is set by the bridge extension in its window's agents and terminals. */
 const vscode: Launcher = (session, cwd) => {
-	const path = process.env.NIT_VSCODE_SOCKET
-	if (!path) return null
-	return new Promise((resolve, reject) => {
-		const socket = connect(path)
-		socket.once("error", (error: NodeJS.ErrnoException) => {
-			// A window that has since closed leaves a stale variable behind (in tmux, say).
-			if (error.code === "ENOENT" || error.code === "ECONNREFUSED") resolve(null)
-			else reject(new Error(`cannot reach the VS Code extension: ${error.message}`))
-		})
-		socket.once("connect", () => {
-			let alive = true
-			socket.on("error", () => {})
-			socket.on("close", () => {
-				alive = false
-			})
-			socket.unref()
-			socket.write(`${JSON.stringify({ script: session.script, cwd })}\n`)
-			resolve(() => alive)
-		})
-	})
+  const path = process.env.NIT_VSCODE_SOCKET
+  if (!path) return null
+  return new Promise((resolve, reject) => {
+    const socket = connect(path)
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      // A window that has since closed leaves a stale variable behind (in tmux, say).
+      if (error.code === "ENOENT" || error.code === "ECONNREFUSED") resolve(null)
+      else reject(new Error(`cannot reach the VS Code extension: ${error.message}`))
+    })
+    socket.once("connect", () => {
+      let alive = true
+      socket.on("error", () => {})
+      socket.on("close", () => {
+        alive = false
+      })
+      socket.unref()
+      socket.write(`${JSON.stringify({ script: session.script, cwd })}\n`)
+      resolve(() => alive)
+    })
+  })
 }
 
 function failure(what: string, result: SpawnSyncReturns<string>): string {
-	const detail = result.error?.message ?? (result.stderr || result.stdout).trim().split("\n")[0]
-	return `${what} failed${detail ? `: ${detail}` : ` with code ${result.status}`}`
+  const detail = result.error?.message ?? (result.stderr || result.stdout).trim().split("\n")[0]
+  return `${what} failed${detail ? `: ${detail}` : ` with code ${result.status}`}`
 }
 
 function which(command: string): boolean {
-	return spawnSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0
+  return spawnSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0
 }
 
 const hyprland: Launcher = (session) => {
-	if (!process.env.HYPRLAND_INSTANCE_SIGNATURE) return null
-	const run = `sh ${quote(session.script)}`
-	const terminal = which("alacritty")
-		? `alacritty --class nit -e ${run}`
-		: which("xdg-terminal-exec")
-			? `xdg-terminal-exec ${run}`
-			: null
-	if (!terminal) throw new Error("no alacritty or xdg-terminal-exec to open")
-	const result = spawnSync("hyprctl", ["dispatch", "exec", `[float; size 90% 90%; center] ${terminal}`], {
-		encoding: "utf-8",
-	})
-	if (result.status !== 0) throw new Error(failure("hyprctl dispatch", result))
-	// The terminal isn't our child; we can only wait for the sentinel.
-	return () => true
+  if (!process.env.HYPRLAND_INSTANCE_SIGNATURE) return null
+  const run = `sh ${quote(session.script)}`
+  const terminal = which("alacritty")
+    ? `alacritty --class nit -e ${run}`
+    : which("xdg-terminal-exec")
+      ? `xdg-terminal-exec ${run}`
+      : null
+  if (!terminal) throw new Error("no alacritty or xdg-terminal-exec to open")
+  const result = spawnSync("hyprctl", ["dispatch", "exec", `[float; size 90% 90%; center] ${terminal}`], {
+    encoding: "utf-8",
+  })
+  if (result.status !== 0) throw new Error(failure("hyprctl dispatch", result))
+  // The terminal isn't our child; we can only wait for the sentinel.
+  return () => true
 }
 
 /**
@@ -145,64 +145,64 @@ const hyprland: Launcher = (session) => {
  * integrated terminal (even if VS Code itself was started from a herdr pane).
  */
 function launchers(): [string, Launcher][] {
-	const inVscode = process.env.NIT_VSCODE_AGENT === "1" || process.env.TERM_PROGRAM === "vscode"
-	const multiplexers: [string, Launcher][] = [
-		["herdr", herdr],
-		["tmux", tmux],
-	]
-	return inVscode
-		? [["vscode", vscode], ...multiplexers, ["hyprland", hyprland]]
-		: [...multiplexers, ["vscode", vscode], ["hyprland", hyprland]]
+  const inVscode = process.env.NIT_VSCODE_AGENT === "1" || process.env.TERM_PROGRAM === "vscode"
+  const multiplexers: [string, Launcher][] = [
+    ["herdr", herdr],
+    ["tmux", tmux],
+  ]
+  return inVscode
+    ? [["vscode", vscode], ...multiplexers, ["hyprland", hyprland]]
+    : [...multiplexers, ["vscode", vscode], ["hyprland", hyprland]]
 }
 
 async function waitFor(session: Session, alive: () => boolean, timeoutMs: number): Promise<boolean> {
-	const deadline = Date.now() + timeoutMs
-	let lastLivenessCheck = 0
-	while (Date.now() < deadline) {
-		if (existsSync(session.done)) return true
-		if (Date.now() - lastLivenessCheck > 2000) {
-			lastLivenessCheck = Date.now()
-			// Give a closing pane a moment to flush the sentinel before declaring it gone.
-			if (!alive()) return existsSync(session.done)
-		}
-		await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-	}
-	return false
+  const deadline = Date.now() + timeoutMs
+  let lastLivenessCheck = 0
+  while (Date.now() < deadline) {
+    if (existsSync(session.done)) return true
+    if (Date.now() - lastLivenessCheck > 2000) {
+      lastLivenessCheck = Date.now()
+      // Give a closing pane a moment to flush the sentinel before declaring it gone.
+      if (!alive()) return existsSync(session.done)
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+  }
+  return false
 }
 
 export async function popup(reviewArgs: string[]): Promise<void> {
-	const cwd = process.cwd()
-	const session = prepare(cwd, reviewArgs)
-	try {
-		let alive: (() => boolean) | null = null
-		const failures: string[] = []
-		for (const [name, launch] of launchers()) {
-			try {
-				alive = await launch(session, cwd)
-			} catch (error) {
-				failures.push(`${name}: ${(error as Error).message}`)
-			}
-			if (alive) break
-		}
-		if (!alive) {
-			process.stdout.write(
-				failures.length
-					? "nit could not open a review window:\n" +
-							failures.map((line) => `  ${line}\n`).join("") +
-							"If this is running inside an agent's sandbox, rerun `nit popup` outside it.\n"
-					: "nit could not open a review window here (no herdr, tmux, VS Code or Hyprland detected).\n" +
-							"In VS Code, run `nit install vscode` and reload the window.\n" +
-							"Run `nit --copy` in another terminal and paste the result instead.\n",
-			)
-			process.exitCode = 1
-			return
-		}
+  const cwd = process.cwd()
+  const session = prepare(cwd, reviewArgs)
+  try {
+    let alive: (() => boolean) | null = null
+    const failures: string[] = []
+    for (const [name, launch] of launchers()) {
+      try {
+        alive = await launch(session, cwd)
+      } catch (error) {
+        failures.push(`${name}: ${(error as Error).message}`)
+      }
+      if (alive) break
+    }
+    if (!alive) {
+      process.stdout.write(
+        failures.length
+          ? "nit could not open a review window:\n" +
+              failures.map((line) => `  ${line}\n`).join("") +
+              "If this is running inside an agent's sandbox, rerun `nit popup` outside it.\n"
+          : "nit could not open a review window here (no herdr, tmux, VS Code or Hyprland detected).\n" +
+              "In VS Code, run `nit install vscode` and reload the window.\n" +
+              "Run `nit --copy` in another terminal and paste the result instead.\n",
+      )
+      process.exitCode = 1
+      return
+    }
 
-		const timeoutMs = Number(process.env.NIT_POPUP_TIMEOUT ?? 3600) * 1000
-		const finished = await waitFor(session, alive, timeoutMs)
-		const review = finished && existsSync(session.out) ? readFileSync(session.out, "utf-8").trim() : ""
-		process.stdout.write(review ? `${review}\n` : "Review cancelled: no comments were sent.\n")
-	} finally {
-		rmSync(session.dir, { recursive: true, force: true })
-	}
+    const timeoutMs = Number(process.env.NIT_POPUP_TIMEOUT ?? 3600) * 1000
+    const finished = await waitFor(session, alive, timeoutMs)
+    const review = finished && existsSync(session.out) ? readFileSync(session.out, "utf-8").trim() : ""
+    process.stdout.write(review ? `${review}\n` : "Review cancelled: no comments were sent.\n")
+  } finally {
+    rmSync(session.dir, { recursive: true, force: true })
+  }
 }

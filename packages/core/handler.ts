@@ -11,32 +11,32 @@ import type { ReplyVia } from "./render.ts"
  * config.json without code (see packages/handlers/agent.ts).
  */
 export interface Handler {
-	name: string
-	description: string
-	/** How the agent reports back per thread, unless the user overrides it. */
-	replyVia: ReplyVia
-	/** Help-bar label for the send key, e.g. "emit", "copy", "send to claude". */
-	sendLabel?: string
-	/** Throws if the handler can't run here (e.g. the agent isn't installed), before anything is dispatched. */
-	preflight?(): void
-	deliver(delivery: Delivery): Promise<Delivered>
+  name: string
+  description: string
+  /** How the agent reports back per thread, unless the user overrides it. */
+  replyVia: ReplyVia
+  /** Help-bar label for the send key, e.g. "emit", "copy", "send to claude". */
+  sendLabel?: string
+  /** Throws if the handler can't run here (e.g. the agent isn't installed), before anything is dispatched. */
+  preflight?(): void
+  deliver(delivery: Delivery): Promise<Delivered>
 }
 
 export interface Delivery {
-	prompt: string
-	batch: ReviewBatch
-	cwd: string
+  prompt: string
+  batch: ReviewBatch
+  cwd: string
 }
 
 export interface Delivered {
-	/** One line for the user. */
-	message?: string
-	/**
-	 * The agent is done with the batch (e.g. its process exited): settle it now. Threads it
-	 * never replied to are routed from `finalText`'s numbered sections, or flagged for review.
-	 */
-	finished?: boolean
-	finalText?: string
+  /** One line for the user. */
+  message?: string
+  /**
+   * The agent is done with the batch (e.g. its process exited): settle it now. Threads it
+   * never replied to are routed from `finalText`'s numbered sections, or flagged for review.
+   */
+  finished?: boolean
+  finalText?: string
 }
 
 /**
@@ -49,13 +49,13 @@ export interface Delivered {
  * Built-in specs (claude, codex, opencode, pi) can be overridden field by field.
  */
 export interface AgentSpec {
-	description?: string
-	/** A new interactive session seeded with the review. */
-	start?: string[]
-	/** The agent's most recent session in this directory, which already has the context of its changes. */
-	continue?: string[]
-	/** Run to completion without a UI; its stdout is shown and parsed for `### N.` replies. */
-	headless?: string[]
+  description?: string
+  /** A new interactive session seeded with the review. */
+  start?: string[]
+  /** The agent's most recent session in this directory, which already has the context of its changes. */
+  continue?: string[]
+  /** Run to completion without a UI; its stdout is shown and parsed for `### N.` replies. */
+  headless?: string[]
 }
 
 export type AgentMode = "start" | "continue" | "headless"

@@ -1,13 +1,15 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { buildVsix } from "./vsix.ts"
 
 /**
  * `nit install <agent>`: wire a `/nit` command into an agent so a review can be started
  * from inside it. Command agents get a markdown command (a skill, for Codex) from integrations/<agent>/
- * that runs `nit popup`; pi gets this package as an extension. The templates are usable
+ * that runs `nit popup`; pi gets this package as an extension, and VS Code-family editors get
+ * the bridge extension that lets `nit popup` open an editor tab. The templates are usable
  * as-is (symlink them if you like) when `nit` is on PATH.
  */
 
@@ -50,6 +52,13 @@ function writeCommand(agent: string, target: string, options: InstallOptions, te
 	return [`wrote ${target}`]
 }
 
+/** Editor CLIs that take `--install-extension`; nit installs into every one on PATH. */
+const EDITORS = ["code", "code-insiders", "codium", "cursor", "windsurf"]
+
+function onPath(command: string): boolean {
+	return spawnSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0
+}
+
 function mcpHint(command: string, options: InstallOptions): string {
 	return `optional: per-thread replies over MCP instead of the CLI: ${command} -- ${quote(options.nit)} mcp`
 }
@@ -81,6 +90,30 @@ const INSTALLERS: Record<string, Installer> = {
 		const result = spawnSync("pi", args, { cwd: options.cwd, stdio: "inherit" })
 		if (result.error || result.status !== 0) throw new Error(`pi ${args.join(" ")} failed`)
 		return ["run /nit in pi"]
+	},
+	vscode: (options) => {
+		if (options.project) throw new Error("the VS Code extension is installed per editor; drop --project")
+		const editors = EDITORS.filter(onPath)
+		if (editors.length === 0) throw new Error(`no editor CLI on PATH (looked for ${EDITORS.join(", ")})`)
+		const dir = mkdtempSync(join(tmpdir(), "nit-vsix-"))
+		try {
+			const vsix = join(dir, "nit.vsix")
+			writeFileSync(vsix, buildVsix(join(ROOT, "integrations", "vscode")))
+			const lines = editors.map((editor) => {
+				const result = spawnSync(editor, ["--install-extension", vsix, "--force"], { encoding: "utf-8" })
+				if (result.error || result.status !== 0) {
+					const detail = result.error?.message ?? (result.stderr || result.stdout).trim()
+					throw new Error(`${editor} --install-extension failed${detail ? `: ${detail}` : ""}`)
+				}
+				return `installed the nit extension into ${editor}`
+			})
+			return [
+				...lines,
+				"reload open windows (Developer: Reload Window), then /nit in the Claude Code or opencode extension opens an editor tab",
+			]
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
 	},
 }
 

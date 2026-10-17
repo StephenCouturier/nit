@@ -1,18 +1,20 @@
 import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /**
  * `nit popup`: open the review TUI somewhere the user can interact with it
- * (a herdr pane, a tmux popup, a floating Hyprland terminal), block until they
+ * (a herdr pane, a tmux popup, a VS Code editor tab, a floating Hyprland terminal), block until they
  * finish, then print the review markdown. This lets non-interactive callers such
  * as Claude Code's `!` command expansion use the TUI.
  *
  * Every launcher runs the same script, which writes the review to a file and then
  * a sentinel. We wait on the sentinel rather than on the launcher process, because
  * most launchers return before the user is done (herdr, hyprctl, single-instance terminals).
+ * VS Code needs the bridge extension from integrations/vscode (`nit install vscode`).
  */
 
 const CLI = fileURLToPath(new URL("./nit.ts", import.meta.url))
@@ -61,7 +63,7 @@ function prepare(cwd: string, reviewArgs: string[]): Session {
  * Returns a liveness check for the launched UI, or null when this launcher isn't available.
  * Throws when it's available but failing, e.g. an agent sandbox blocking its socket.
  */
-type Launcher = (session: Session, cwd: string) => (() => boolean) | null
+type Launcher = (session: Session, cwd: string) => (() => boolean) | null | Promise<(() => boolean) | null>
 
 const herdr: Launcher = (session, cwd) => {
 	if (!process.env.HERDR_PANE_ID) return null
@@ -85,6 +87,30 @@ const tmux: Launcher = (session, cwd) => {
 		alive = false
 	})
 	return () => alive
+}
+
+/** NIT_VSCODE_SOCKET is set by the bridge extension in its window's agents and terminals. */
+const vscode: Launcher = (session, cwd) => {
+	const path = process.env.NIT_VSCODE_SOCKET
+	if (!path) return null
+	return new Promise((resolve, reject) => {
+		const socket = connect(path)
+		socket.once("error", (error: NodeJS.ErrnoException) => {
+			// A window that has since closed leaves a stale variable behind (in tmux, say).
+			if (error.code === "ENOENT" || error.code === "ECONNREFUSED") resolve(null)
+			else reject(new Error(`cannot reach the VS Code extension: ${error.message}`))
+		})
+		socket.once("connect", () => {
+			let alive = true
+			socket.on("error", () => {})
+			socket.on("close", () => {
+				alive = false
+			})
+			socket.unref()
+			socket.write(`${JSON.stringify({ script: session.script, cwd })}\n`)
+			resolve(() => alive)
+		})
+	})
 }
 
 function failure(what: string, result: SpawnSyncReturns<string>): string {
@@ -113,11 +139,21 @@ const hyprland: Launcher = (session) => {
 	return () => true
 }
 
-const LAUNCHERS: [string, Launcher][] = [
-	["herdr", herdr],
-	["tmux", tmux],
-	["hyprland", hyprland],
-]
+/**
+ * Multiplexer variables leak into whatever is launched from inside one, so try the
+ * innermost host first: VS Code when the agent was spawned by an extension or runs in an
+ * integrated terminal (even if VS Code itself was started from a herdr pane).
+ */
+function launchers(): [string, Launcher][] {
+	const inVscode = process.env.NIT_VSCODE_AGENT === "1" || process.env.TERM_PROGRAM === "vscode"
+	const multiplexers: [string, Launcher][] = [
+		["herdr", herdr],
+		["tmux", tmux],
+	]
+	return inVscode
+		? [["vscode", vscode], ...multiplexers, ["hyprland", hyprland]]
+		: [...multiplexers, ["vscode", vscode], ["hyprland", hyprland]]
+}
 
 async function waitFor(session: Session, alive: () => boolean, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
@@ -140,9 +176,9 @@ export async function popup(reviewArgs: string[]): Promise<void> {
 	try {
 		let alive: (() => boolean) | null = null
 		const failures: string[] = []
-		for (const [name, launch] of LAUNCHERS) {
+		for (const [name, launch] of launchers()) {
 			try {
-				alive = launch(session, cwd)
+				alive = await launch(session, cwd)
 			} catch (error) {
 				failures.push(`${name}: ${(error as Error).message}`)
 			}
@@ -154,7 +190,8 @@ export async function popup(reviewArgs: string[]): Promise<void> {
 					? "nit could not open a review window:\n" +
 							failures.map((line) => `  ${line}\n`).join("") +
 							"If this is running inside an agent's sandbox, rerun `nit popup` outside it.\n"
-					: "nit could not open a review window here (no herdr, tmux or Hyprland detected).\n" +
+					: "nit could not open a review window here (no herdr, tmux, VS Code or Hyprland detected).\n" +
+							"In VS Code, run `nit install vscode` and reload the window.\n" +
 							"Run `nit --copy` in another terminal and paste the result instead.\n",
 			)
 			process.exitCode = 1

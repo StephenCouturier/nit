@@ -1,0 +1,22 @@
+{
+	"name": "nit",
+	"displayName": "nit",
+	"description": "Lets agents running in this window (the Claude Code and opencode extensions, or any integrated terminal) open nit's review TUI in an editor tab",
+	"version": "0.1.1",
+	"publisher": "stephencouturier",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/StephenCouturier/nit"
+	},
+	"engines": {
+		"vscode": "^1.75.0"
+	},
+	"categories": ["Other"],
+	"activationEvents": ["*"],
+	"main": "./extension.js",
+	"capabilities": {
+		"untrustedWorkspaces": { "supported": true },
+		"virtualWorkspaces": false
+	}
+}

@@ -1,4 +1,4 @@
-import type { Component, Focusable, TUI } from "@earendil-works/pi-tui"
+import type { Component, Focusable, TUI, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui"
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui"
 import type { UiPrefs } from "../core/config.ts"
 import type { DiffLine, FileDiff } from "../core/diff.ts"
@@ -46,6 +46,8 @@ const MIN_VIEWPORT = 8
 const CHROME_ROWS = 10
 /** Below this width split view falls back to unified. */
 const MIN_SPLIT_WIDTH = 100
+const WHEEL_LINES = 3
+const SGR_MOUSE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/
 
 /** Vim smartcase: case-insensitive unless the query has a capital. Invalid regexes match literally. */
 function compileSearch(query: string): RegExp | null {
@@ -191,6 +193,33 @@ export class ReviewComponent implements Component, Focusable {
     const maxTop = Math.max(0, this.rows.length - height)
     if (this.scrollTop > maxTop) this.scrollTop = maxTop
     if (this.scrollTop < 0) this.scrollTop = 0
+  }
+
+  private scrollBy(delta: number): void {
+    const height = this.viewportHeight()
+    const maxTop = Math.max(0, this.rows.length - height)
+    this.scrollTop = Math.min(maxTop, Math.max(0, this.scrollTop + delta))
+    const bottom = Math.min(this.rows.length, this.scrollTop + height) - 1
+    if (this.cursor >= this.scrollTop && this.cursor <= bottom) return
+    const step = this.cursor < this.scrollTop ? 1 : -1
+    for (let index = step === 1 ? this.scrollTop : bottom; index >= this.scrollTop && index <= bottom; index += step) {
+      if (isSelectable(this.rows[index]!)) {
+        this.cursor = index
+        return
+      }
+    }
+  }
+
+  private wheel(delta: number): void {
+    if (this.mode !== "browse" || delta === 0) return
+    this.scrollBy(delta)
+    this.tui.requestRender()
+  }
+
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.type !== "wheel") return undefined
+    this.wheel((event.wheelDelta ?? 0) * WHEEL_LINES)
+    return { handled: true, render: false }
   }
 
   private currentRow(): Row | undefined {
@@ -442,6 +471,13 @@ export class ReviewComponent implements Component, Focusable {
   // ── input ───────────────────────────────────────────────────────
 
   handleInput(data: string): void {
+    const mouse = SGR_MOUSE.exec(data)
+    if (mouse) {
+      const button = Number(mouse[1]) & 67
+      if (mouse[4] === "M" && (button === 64 || button === 65)) this.wheel((button === 64 ? -1 : 1) * WHEEL_LINES)
+      return
+    }
+
     if (this.mode === "search") {
       this.input?.handleInput(data)
       this.previewSearch()

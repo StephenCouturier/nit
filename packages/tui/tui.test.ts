@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import type { TUI, TuiMouseEvent } from "@earendil-works/pi-tui"
 import { fileDiffHash, parseUnifiedDiff } from "../core/diff.ts"
 import { addThread, createState } from "../core/threads.ts"
 import { actionFor, matchesBinding, resolveKeys } from "./keys.ts"
 import { buildRows, nextHunk, nextSelectable } from "./rows.ts"
-import { parseBase16 } from "./theme.ts"
+import { ReviewComponent } from "./review-component.ts"
+import { loadTheme, parseBase16 } from "./theme.ts"
 
 test("key overrides replace defaults; unknown actions are rejected", () => {
   const keys = resolveKeys({ send: "ctrl+s" })
@@ -39,4 +41,35 @@ test("rows interleave threads under their line and skip viewed files", () => {
   state.viewed = { f: "stale" }
   const [header] = buildRows([file], state, { split: false })
   assert.equal(header?.kind === "file" && header.view, "changed")
+})
+
+test("mouse wheel scrolls the viewport and drags the cursor along", () => {
+  const body = Array.from({ length: 60 }, (_, index) => `+line${index}`).join("\n")
+  const file = parseUnifiedDiff(`@@ -0,0 +1,60 @@\n${body}\n`, "f")
+  const tui = { terminal: { rows: 20 }, requestRender: () => {} } as unknown as TUI
+  const component = new ReviewComponent({
+    tui,
+    theme: loadTheme(undefined),
+    files: [file],
+    state: createState("/repo", "main", "HEAD"),
+    onChange: () => {},
+    onSend: () => {},
+    onClose: () => {},
+    chromeRows: 5,
+  })
+  const viewport = (lines: string[]) => lines.slice(2, 17).join("\n").replace(/\x1b\[[0-9;]*m/g, "")
+
+  assert.match(viewport(component.render(80)), /▌.*\bf\b/)
+  component.handleInput("\x1b[<65;1;1M")
+  component.handleInput("\x1b[<65;1;1M")
+  const scrolled = viewport(component.render(80))
+  assert.doesNotMatch(scrolled, /line0\b/)
+  assert.match(scrolled, /▌.*line4\b/)
+
+  component.handleInput("\x1b[<64;1;1M")
+  assert.match(viewport(component.render(80)), /line1\b/)
+
+  assert.deepEqual(component.handleMouse({ type: "wheel", wheelDelta: 1 } as TuiMouseEvent), { handled: true, render: false })
+  component.handleInput("\x1b[<0;1;1M")
+  component.handleInput("\x1b[<0;1;1m")
 })

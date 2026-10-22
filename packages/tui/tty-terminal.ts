@@ -23,7 +23,7 @@ export class TtyTerminal implements Terminal {
   start(onInput: (data: string) => void, onResize: () => void): void {
     this.input.setRawMode(true)
     this.input.setEncoding("utf8")
-    this.output.write("\x1b[?1049h\x1b[H\x1b[2J")
+    this.output.write("\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[H\x1b[2J")
 
     const buffer = new StdinBuffer()
     buffer.on("data", (sequence) => onInput(sequence))
@@ -41,7 +41,7 @@ export class TtyTerminal implements Terminal {
     if (this.onData) this.input.off("data", this.onData)
     if (this.onResize) this.output.off("resize", this.onResize)
     this.buffer?.destroy()
-    this.output.write("\x1b[?25h\x1b[?1049l")
+    this.output.write("\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l")
     this.input.setRawMode(false)
     this.input.pause()
   }

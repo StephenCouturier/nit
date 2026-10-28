@@ -21,7 +21,7 @@ nit install vscode      # lets /nit open a tab in VS Code (code, codium, cursor,
 
 `--project` installs into the current repo only; `--force` replaces an existing command that differs.
 
-In Claude Code, opencode and Codex, `/nit` opens the review in a herdr pane, tmux popup, VS Code editor tab, or floating Hyprland terminal (needs `hyprctl` plus `alacritty` or `xdg-terminal-exec`), so run the agent inside one of those. The VS Code tab covers the Claude Code and opencode extensions and agents in the integrated terminal. It needs `nit install vscode` plus the agent's `/nit` command, and works from windows and terminals opened after the install. pi shows it inline. In Codex, approve the sandbox escalation when asked. Anywhere else, run `nit --copy` in another terminal and paste the result into the agent.
+In Claude Code, opencode and Codex, `/nit` opens the review in a herdr pane, tmux popup, kitty overlay (needs `allow_remote_control yes` and `listen_on` in `kitty.conf`), VS Code editor tab, or floating Hyprland terminal (needs `hyprctl` plus `alacritty` or `xdg-terminal-exec`), so run the agent inside one of those. The VS Code tab covers the Claude Code and opencode extensions and agents in the integrated terminal. It needs `nit install vscode` plus the agent's `/nit` command, and works from windows and terminals opened after the install. pi shows it inline. In Codex, approve the sandbox escalation when asked. Anywhere else, run `nit --copy` in another terminal and paste the result into the agent.
 
 Optional: the MCP server lets the agent reply per thread:
 

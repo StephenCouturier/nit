@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url"
 
 /**
  * `nit popup`: open the review TUI somewhere the user can interact with it
- * (a herdr pane, a tmux popup, a VS Code editor tab, a floating Hyprland terminal), block until they
+ * (a herdr pane, a tmux popup, a kitty overlay, a VS Code editor tab, a floating Hyprland terminal), block until they
  * finish, then print the review markdown. This lets non-interactive callers such
  * as Claude Code's `!` command expansion use the TUI.
  *
@@ -89,6 +89,20 @@ const tmux: Launcher = (session, cwd) => {
   return () => alive
 }
 
+/** KITTY_LISTEN_ON only exists when kitty has `listen_on` set; the agent has no tty for kitty's escape-code channel. */
+const kitty: Launcher = (session, cwd) => {
+  const address = process.env.KITTY_LISTEN_ON
+  const windowId = process.env.KITTY_WINDOW_ID
+  if (!address || !windowId || !which("kitten")) return null
+  const remote = (...args: string[]) => spawnSync("kitten", ["@", "--to", address, ...args], { encoding: "utf-8" })
+  const launched = remote("launch", "--type=overlay", "--match", `window_id:${windowId}`, "--cwd", cwd, "sh", session.script)
+  const id = /^\d+$/.exec((launched.stdout ?? "").trim())?.[0]
+  if (launched.status !== 0 || !id) {
+    throw new Error(`${failure("kitten @ launch", launched)} (kitty needs allow_remote_control and listen_on)`)
+  }
+  return () => remote("ls", "--match", `id:${id}`).status === 0
+}
+
 /** NIT_VSCODE_SOCKET is set by the bridge extension in its window's agents and terminals. */
 const vscode: Launcher = (session, cwd) => {
   const path = process.env.NIT_VSCODE_SOCKET
@@ -149,6 +163,7 @@ function launchers(): [string, Launcher][] {
   const multiplexers: [string, Launcher][] = [
     ["herdr", herdr],
     ["tmux", tmux],
+    ["kitty", kitty],
   ]
   return inVscode
     ? [["vscode", vscode], ...multiplexers, ["hyprland", hyprland]]
@@ -190,7 +205,7 @@ export async function popup(reviewArgs: string[]): Promise<void> {
           ? "nit could not open a review window:\n" +
               failures.map((line) => `  ${line}\n`).join("") +
               "If this is running inside an agent's sandbox, rerun `nit popup` outside it.\n"
-          : "nit could not open a review window here (no herdr, tmux, VS Code or Hyprland detected).\n" +
+          : "nit could not open a review window here (no herdr, tmux, kitty, VS Code or Hyprland detected).\n" +
               "In VS Code, run `nit install vscode` and reload the window.\n" +
               "Run `nit --copy` in another terminal and paste the result instead.\n",
       )

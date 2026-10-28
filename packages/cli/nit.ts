@@ -37,7 +37,7 @@ nit <command>
   install <agent> [--project] [--force]
                          add a /nit command to ${INSTALLABLE.join(", ")}
                          (vscode: the extension that lets /nit open a VS Code tab)
-  popup [review options] open the TUI in a herdr pane / tmux popup / VS Code tab / floating Hyprland terminal,
+  popup [review options] open the TUI in a herdr pane / tmux popup / kitty overlay / VS Code tab / floating Hyprland terminal,
                          wait for it, and print the review (for agents' slash commands)
   dispatch [--to <handler>] [--branch] [--base <ref>] [--reply sections|tool|cli] [--compact]
                          send all open threads as a new batch without the TUI (default: stdout)
